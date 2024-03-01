@@ -914,6 +914,10 @@ class HCPortfolio(object):
         elif codependence in {"custom_cov"}:
             self.codep = af.cov2corr(custom_cov).astype(float)
 
+        # DPCCA method
+        elif codependence_method == 'dpcca':
+            k = kwargs.get('k', 252) 
+            _, _, _, self.codep = compute_dpcca_others(returns, k)
         # Step-1: Tree clustering
         self.clusters, self.k = self._hierarchical_clustering(
             model, linkage, codependence, max_k, leaf_order=leaf_order

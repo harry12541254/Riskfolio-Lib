@@ -257,7 +257,7 @@ class HCPortfolio(object):
         elif codependence in {"tail"}:
             dist = -np.log(self.codep).astype(float)
         elif codependence in {"dpcca"}:
-            dist = ((1 - corr) / 2.)**.5
+            dist = ((1 - self.codep) / 2.)**.5
             dist = dist.fillna(1)
 
         # Hierarchical clustering

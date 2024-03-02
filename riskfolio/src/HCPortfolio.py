@@ -681,6 +681,7 @@ class HCPortfolio(object):
         weights = intra_weights.mul(inter_weights, axis=1).sum(axis=1).sort_index()
 
         return weights
+
     def _sliding_window(self, xx,k):
     # generate indexes! O(1) way of doing it :)
         idx = np.arange(k)[None, :]+np.arange(len(xx)-k+1)[:, None]
@@ -701,7 +702,7 @@ class HCPortfolio(object):
         allxdif = []
         # Get alldif and F2_dfa
         for ivar in range(nvars): # do for all vars
-            xx_swin , idx = _sliding_window(xx[:,ivar],k)
+            xx_swin , idx = self._sliding_window(xx[:,ivar],k)
             nwin = xx_swin.shape[0]
             b1, b0 = np.polyfit(np.arange(k),xx_swin.T,deg=1) # linear fit (UPDATE if needed)
 
@@ -983,7 +984,7 @@ class HCPortfolio(object):
         # DPCCA method
         elif codependence in {'dpcca'}:
             k = kwargs.get('k', 252) 
-            _, _, _, self.codep = _compute_dpcca_others(self.returns, k)
+            _, _, _, self.codep = self._compute_dpcca_others(self.returns, k)
 
         # Step-1: Tree clustering
         self.clusters, self.k = self._hierarchical_clustering(

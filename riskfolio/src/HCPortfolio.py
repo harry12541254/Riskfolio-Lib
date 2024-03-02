@@ -16,6 +16,7 @@ import riskfolio.src.AuxFunctions as af
 import riskfolio.src.ParamsEstimation as pe
 import riskfolio.src.DBHT as db
 import riskfolio.src.GerberStatistic as gs
+from numpy.matlib import repmat
 
 
 __all__ = [
@@ -255,6 +256,9 @@ class HCPortfolio(object):
             dist = af.var_info_matrix(self.returns, self.bins_info).astype(float)
         elif codependence in {"tail"}:
             dist = -np.log(self.codep).astype(float)
+        elif codependence in {"dpcca"}:
+            dist = ((1 - corr) / 2.)**.5
+            dist = dist.fillna(1)
 
         # Hierarchical clustering
         dist = dist.to_numpy()
@@ -677,7 +681,69 @@ class HCPortfolio(object):
         weights = intra_weights.mul(inter_weights, axis=1).sum(axis=1).sort_index()
 
         return weights
+    def _sliding_window(self, xx,k):
+    # generate indexes! O(1) way of doing it :)
+        idx = np.arange(k)[None, :]+np.arange(len(xx)-k+1)[:, None]
+        return xx[idx],idx
 
+    def _compute_dpcca_others(self, cdata,k):
+
+        # Define
+        nsamples,nvars = cdata.shape
+        assets = cdata.columns
+        # Cummulative sum after removing mean
+        #cdata = signal.detrend(cdata,axis=0) # different from only removing the mean...
+        cdata = cdata.values
+        cdata = cdata-cdata.mean(axis=0)
+        xx = np.cumsum(cdata,axis=0)
+
+        F2_dfa_x = np.zeros(nvars)
+        allxdif = []
+        # Get alldif and F2_dfa
+        for ivar in range(nvars): # do for all vars
+            xx_swin , idx = _sliding_window(xx[:,ivar],k)
+            nwin = xx_swin.shape[0]
+            b1, b0 = np.polyfit(np.arange(k),xx_swin.T,deg=1) # linear fit (UPDATE if needed)
+
+            #x_hat = [[b1[i]*j+b0[i] for j in range(k)] for i in range(nwin)] # Slower version
+            x_hatx = repmat(b1,k,1).T*repmat(range(k),nwin,1) + repmat(b0,k,1).T
+
+            # Store differences to the linear fit
+            xdif = xx_swin-x_hatx
+            allxdif.append(xdif)
+            # Eq.4
+            F2_dfa_x[ivar] = (xdif**2).mean()
+        # Get the DCCA matrix
+        dcca = np.zeros([nvars,nvars])
+        for i in range(nvars): # do for all vars
+            for j in range(nvars): # do for all vars
+                # Eq.5 and 6
+                F2_dcca = (allxdif[i]*allxdif[j]).mean()
+                # Eq.1: DCCA
+                dcca[i,j] = F2_dcca / np.sqrt(F2_dfa_x[i] * F2_dfa_x[j])
+
+        # Get DPCCA
+        C = np.linalg.inv(dcca)
+
+        # DPCCA (oneliner version)
+        mydiag = np.sqrt(np.abs(np.diag(C)))
+        dpcca = (-C/repmat(mydiag,nvars,1).T)/repmat(mydiag,nvars,1)+2*np.eye(nvars)
+
+        # Include correlation and partial corr just for comparison ;)
+        # Compute Corr
+        corr = np.corrcoef(cdata.T)
+        # Get parCorr
+        cov = np.cov(cdata.T)
+        C0 = np.linalg.inv(cov)
+        mydiag = np.sqrt(np.abs(np.diag(C0)))
+        parCorr = (-C0/repmat(mydiag,nvars,1).T)/repmat(mydiag,nvars,1)+2*np.eye(nvars)
+
+        dcca_df = pd.DataFrame(dcca, index=assets, columns=assets)
+        dpcca_df = pd.DataFrame(dpcca, index=assets, columns=assets)
+        corr_df = pd.DataFrame(corr, index=assets, columns=assets)
+        parCorr_df = pd.DataFrame(parCorr, index=assets, columns=assets)
+        return corr_df, parCorr_df, dcca_df, dpcca_df
+    
     # Allocate weights
     def optimization(
         self,
@@ -915,9 +981,10 @@ class HCPortfolio(object):
             self.codep = af.cov2corr(custom_cov).astype(float)
 
         # DPCCA method
-        elif codependence_method == 'dpcca':
+        elif codependence in {'dpcca'}:
             k = kwargs.get('k', 252) 
-            _, _, _, self.codep = compute_dpcca_others(returns, k)
+            _, _, _, self.codep = _compute_dpcca_others(self.returns, k)
+
         # Step-1: Tree clustering
         self.clusters, self.k = self._hierarchical_clustering(
             model, linkage, codependence, max_k, leaf_order=leaf_order
